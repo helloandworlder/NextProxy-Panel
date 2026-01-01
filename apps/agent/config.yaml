@@ -1,0 +1,13 @@
+panel_url: "http://localhost:3001/api"
+node_token: "676db4b2-1800-4fa7-abf7-37af49c6ab2a"
+xray_binary_path: "/tmp/xray-bin/xray"
+xray_config_path: "/tmp/xray-config.json"
+xray_asset_path: "/tmp/xray-bin"
+config_poll_interval: 30
+user_poll_interval: 30
+traffic_report_interval: 10
+status_report_interval: 30
+alive_poll_interval: 60
+http_timeout: 30
+http_retry_count: 3
+log_level: "debug"

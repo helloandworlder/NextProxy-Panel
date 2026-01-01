@@ -1,0 +1,4 @@
+{
+  "build_command": "npm run build",
+  "output_dir": "dist"
+}

@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+.env.local
+.env.prd
+.env.dev
+*.log
+.turbo
+.prisma

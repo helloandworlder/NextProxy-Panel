@@ -1,0 +1,114 @@
+# Panel Integration Test Docker Compose
+# Usage: docker compose -f compose.test.yml up -d
+# Test: bun test tests/integration/
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: panel-postgres-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: testpass
+      POSTGRES_DB: panel_test
+    ports:
+      - "5434:5432"
+    volumes:
+      - panel_test_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - panel-test-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: panel-redis-test
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6380:6379"
+    volumes:
+      - panel_test_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - panel-test-network
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: panel-api-test
+    restart: unless-stopped
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:testpass@postgres:5432/panel_test
+      REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: test-jwt-secret-for-integration-testing
+      JWT_EXPIRES_IN: 7d
+      API_PORT: 3001
+      API_PREFIX: api/v1
+      CORS_ORIGIN: "*"
+      LOG_LEVEL: debug
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["node", "dist/main.js"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - panel-test-network
+
+  agent:
+    build:
+      context: ./apps/agent
+      dockerfile: Dockerfile
+    container_name: panel-agent-test
+    restart: unless-stopped
+    environment:
+      PANEL_URL: http://api:3001
+      NODE_TOKEN: ${TEST_NODE_TOKEN:-will-be-set-by-setup}
+      XRAY_BINARY_PATH: /usr/local/bin/xray
+      XRAY_CONFIG_PATH: /etc/xray/config.json
+      XRAY_ASSET_PATH: /usr/local/share/xray
+      CONFIG_POLL_INTERVAL: 10
+      USER_POLL_INTERVAL: 10
+      TRAFFIC_REPORT_INTERVAL: 5
+      STATUS_REPORT_INTERVAL: 5
+      LOG_LEVEL: debug
+    ports:
+      - "1080:1080"   # Socks5 proxy port
+      - "10085:10085" # Xray gRPC API
+    volumes:
+      - ./apps/agent/config.test.yaml:/etc/panel-agent/config.yaml:ro
+      - agent_xray_config:/etc/xray
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - panel-test-network
+
+volumes:
+  panel_test_postgres:
+  panel_test_redis:
+  agent_xray_config:
+
+networks:
+  panel-test-network:
+    driver: bridge

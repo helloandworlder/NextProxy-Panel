@@ -1,0 +1,817 @@
+// Prisma Schema for Panel - Enterprise Proxy Node Management Platform
+// Architecture v3.0 - Simplified 3x-ui Style with Pure JSON Passthrough
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// System Admin Layer
+// ============================================
+
+model SystemAdmin {
+  id           String    @id @default(uuid()) @db.Uuid
+  username     String    @unique @db.VarChar(50)
+  passwordHash String    @map("password_hash") @db.VarChar(255)
+  email        String?   @db.VarChar(100)
+  permissions  Json      @default("[\"*\"]")
+  enable       Boolean   @default(true)
+  lastLoginAt  DateTime? @map("last_login_at")
+  lastLoginIp  String?   @map("last_login_ip") @db.VarChar(50)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@map("system_admins")
+}
+
+// ============================================
+// Multi-Tenant Layer
+// ============================================
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  username     String    @unique @db.VarChar(50)
+  email        String?   @unique @db.VarChar(100)
+  passwordHash String    @map("password_hash") @db.VarChar(255)
+  enable       Boolean   @default(true)
+  lastLoginAt  DateTime? @map("last_login_at")
+  lastLoginIp  String?   @map("last_login_ip") @db.VarChar(50)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  tenantMemberships TenantMembership[]
+  auditLogs         AuditLog[]
+
+  @@map("users")
+}
+
+model TenantMembership {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  role        String   @default("operator") @db.VarChar(20)
+  permissions Json     @default("[]")
+  isDefault   Boolean  @default(false) @map("is_default")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([userId])
+  @@index([tenantId])
+  @@map("tenant_memberships")
+}
+
+model Tenant {
+  id              String    @id @default(uuid()) @db.Uuid
+  name            String    @db.VarChar(100)
+  slug            String    @unique @db.VarChar(50)
+  status          String    @default("active") @db.VarChar(20)
+  maxNodes        Int       @default(10) @map("max_nodes")
+  maxClients      Int       @default(1000) @map("max_clients")
+  maxTrafficBytes BigInt    @default(0) @map("max_traffic_bytes")
+  settings        Json      @default("{}")
+  expiresAt       DateTime? @map("expires_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  memberships   TenantMembership[]
+  apiKeys       TenantApiKey[]
+  nodes         Node[]
+  nodeGroups    NodeGroup[]
+  inbounds      Inbound[]
+  outbounds     Outbound[]
+  routingRules  RoutingRule[]
+  balancers     Balancer[]
+  dnsConfigs    DnsConfig[]
+  policyConfigs PolicyConfig[]
+  clients        Client[]
+  auditLogs      AuditLog[]
+  dnsProviders   DnsProvider[]
+  tenantSettings TenantSettings?
+
+  @@map("tenants")
+}
+
+model TenantApiKey {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  name       String    @db.VarChar(100)
+  keyHash    String    @map("key_hash") @db.VarChar(255)
+  keyPrefix  String    @map("key_prefix") @db.VarChar(10)
+  scopes     Json      @default("[\"*\"]")
+  rateLimit  Int       @default(1000) @map("rate_limit")
+  allowedIps Json      @default("[]") @map("allowed_ips")
+  expiresAt  DateTime? @map("expires_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  auditLogs AuditLog[]
+
+  @@unique([tenantId, name])
+  @@index([keyPrefix])
+  @@map("tenant_api_keys")
+}
+
+// ============================================
+// Node Layer
+// ============================================
+
+model NodeGroup {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  name         String   @db.VarChar(100)
+  groupType    String   @default("custom") @map("group_type") @db.VarChar(50)
+  schemaFields Json     @default("[]") @map("schema_fields")
+  requiredTags Json     @default("[]") @map("required_tags")
+  lbStrategy   String   @default("round_robin") @map("lb_strategy") @db.VarChar(50)
+  lbSettings   Json     @default("{}") @map("lb_settings")
+  healthCheck  Json     @default("{}") @map("health_check")
+  remark       String?  @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  nodes  Node[]
+
+  @@unique([tenantId, name])
+  @@index([groupType])
+  @@map("node_groups")
+}
+
+model Node {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  nodeGroupId     String?   @map("node_group_id") @db.Uuid
+  name            String    @db.VarChar(100)
+  token           String    @unique @db.VarChar(255)
+  publicIp        String?   @map("public_ip") @db.VarChar(50)
+  grpcPort        Int       @default(50051) @map("grpc_port")
+  nodeType        String    @default("standard") @map("node_type") @db.VarChar(20)
+  ingressConfig   Json?     @map("ingress_config")
+  countryCode     String?   @map("country_code") @db.VarChar(10)
+  countryName     String?   @map("country_name") @db.VarChar(100)
+  city            String?   @db.VarChar(100)
+  isp             String?   @db.VarChar(100)
+  status          String    @default("offline") @db.VarChar(20)
+  lastSeenAt      DateTime? @map("last_seen_at")
+  systemInfo      Json      @default("{}") @map("system_info")
+  runtimeStats    Json      @default("{}") @map("runtime_stats")
+  configOverrides Json      @default("{}") @map("config_overrides")
+  groupMeta       Json      @default("{}") @map("group_meta")
+  tags            Json      @default("[]")
+  remark          String?   @db.VarChar(255)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  nodeGroup      NodeGroup?           @relation(fields: [nodeGroupId], references: [id], onDelete: SetNull)
+  egressIps      EgressIp[]
+  inbounds       Inbound[]
+  outbounds      Outbound[]
+  routingRules   RoutingRule[]
+  balancers      Balancer[]
+  dnsConfigs     DnsConfig[]
+  policyConfigs  PolicyConfig[]
+  clientStats    ClientStats[]
+  dnsRecords     DnsRecord[]
+  relayEndpoints GoSeaRelayEndpoint[]
+  nodeStats      NodeStats[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([status])
+  @@index([countryCode])
+  @@index([nodeType])
+  @@map("nodes")
+}
+
+model EgressIp {
+  id            String    @id @default(uuid()) @db.Uuid
+  nodeId        String    @map("node_id") @db.Uuid
+  ip            String    @db.VarChar(50)
+  ipVersion     Int       @default(4) @map("ip_version")
+  interfaceName String?   @map("interface_name") @db.VarChar(50)
+  ipType        String    @default("datacenter") @map("ip_type") @db.VarChar(20)
+  isp           String?   @db.VarChar(100)
+  asn           String?   @db.VarChar(50)
+  isActive      Boolean   @default(true) @map("is_active")
+  currentUsers  Int       @default(0) @map("current_users")
+  maxUsers      Int       @default(0) @map("max_users")
+  metadata      Json      @default("{}")
+  lastCheckedAt DateTime? @map("last_checked_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  node      Node       @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  outbounds Outbound[]
+
+  @@unique([nodeId, ip])
+  @@index([nodeId])
+  @@index([ipType])
+  @@map("egress_ips")
+}
+
+// ============================================
+// Xray Config Layer (3x-ui Style - Pure JSON Passthrough)
+// ============================================
+
+model Inbound {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  nodeId   String @map("node_id") @db.Uuid
+
+  // Core fields for querying/indexing
+  tag      String @db.VarChar(100)
+  protocol String @db.VarChar(50) // vless, vmess, trojan, shadowsocks, socks, http
+  port     Int
+  listen   String @default("0.0.0.0") @db.VarChar(50)
+
+  // Xray native config (Pure JSON passthrough - 3x-ui style)
+  // settings: { clients: [], decryption: "none", ... }
+  settings       String @default("{}") @db.Text
+  // streamSettings: { network: "tcp", security: "reality", realitySettings: {...}, ... }
+  streamSettings String @default("{}") @map("stream_settings") @db.Text
+  // sniffing: { enabled: true, destOverride: ["http", "tls"], routeOnly: false }
+  sniffing       String @default("{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}") @db.Text
+
+  // Management
+  enable    Boolean  @default(true)
+  remark    String?  @db.VarChar(255)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  node        Node          @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  clientStats ClientStats[]
+  inboundStats InboundStats[]
+
+  @@unique([nodeId, tag])
+  @@unique([nodeId, port, listen])
+  @@index([tenantId])
+  @@index([nodeId])
+  @@index([protocol])
+  @@map("inbounds")
+}
+
+model Outbound {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  nodeId   String @map("node_id") @db.Uuid
+
+  // Core fields
+  tag         String  @db.VarChar(100)
+  protocol    String  @db.VarChar(50) // freedom, blackhole, dns, socks, vmess, vless, trojan, shadowsocks
+  sendThrough String? @map("send_through") @db.VarChar(50)
+  egressIpId  String? @map("egress_ip_id") @db.Uuid
+
+  // Xray native config (Pure JSON passthrough)
+  settings       String @default("{}") @db.Text
+  streamSettings String @default("{}") @map("stream_settings") @db.Text
+  proxySettings  String @default("{}") @map("proxy_settings") @db.Text
+  muxSettings    String @default("{}") @map("mux_settings") @db.Text
+
+  // Management
+  priority  Int      @default(100)
+  enable    Boolean  @default(true)
+  remark    String?  @db.VarChar(255)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  node     Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  egressIp EgressIp? @relation(fields: [egressIpId], references: [id], onDelete: SetNull)
+
+  @@unique([nodeId, tag])
+  @@index([tenantId])
+  @@index([nodeId])
+  @@index([protocol])
+  @@map("outbounds")
+}
+
+model RoutingRule {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  nodeId   String @map("node_id") @db.Uuid
+
+  ruleTag  String @map("rule_tag") @db.VarChar(100)
+  priority Int    @default(100)
+
+  // Xray routing rule (100% JSON passthrough)
+  ruleConfig String @default("{}") @map("rule_config") @db.Text
+
+  enable    Boolean  @default(true)
+  remark    String?  @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  node   Node   @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@unique([nodeId, ruleTag])
+  @@index([tenantId])
+  @@index([nodeId])
+  @@index([priority])
+  @@map("routing_rules")
+}
+
+model Balancer {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  nodeId   String @map("node_id") @db.Uuid
+
+  tag            String @db.VarChar(100)
+  balancerConfig String @default("{\"selector\":[],\"strategy\":{\"type\":\"random\"}}") @map("balancer_config") @db.Text
+
+  enable    Boolean  @default(true)
+  remark    String?  @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  node   Node   @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@unique([nodeId, tag])
+  @@index([nodeId])
+  @@map("balancers")
+}
+
+model DnsConfig {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  nodeId   String @map("node_id") @db.Uuid
+
+  dnsConfig String @default("{}") @map("dns_config") @db.Text
+
+  enable    Boolean  @default(true)
+  remark    String?  @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  node   Node   @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@unique([nodeId])
+  @@map("dns_configs")
+}
+
+model PolicyConfig {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  nodeId   String @map("node_id") @db.Uuid
+
+  policyConfig String @default("{\"levels\":{\"0\":{\"statsUserUplink\":true,\"statsUserDownlink\":true}},\"system\":{\"statsInboundUplink\":true,\"statsInboundDownlink\":true}}") @map("policy_config") @db.Text
+
+  enable    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  node   Node   @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@unique([nodeId])
+  @@map("policy_configs")
+}
+
+// ============================================
+// Client Layer (Simplified - No ClientInboundAccess)
+// Clients are embedded in Inbound.settings.clients[]
+// This table is for quota management, stats, and subscription
+// ============================================
+
+model Client {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  // Xray user identifier (globally unique for stats)
+  email String @db.VarChar(100)
+
+  // Credentials (protocol-dependent)
+  uuid     String? @db.VarChar(36) // VLESS/VMess
+  password String? @db.VarChar(255) // Trojan/Shadowsocks
+  flow     String? @db.VarChar(50) // VLESS flow: xtls-rprx-vision
+  method   String? @db.VarChar(50) // Shadowsocks cipher
+  level    Int     @default(0)
+
+  // Quota and limits
+  totalBytes    BigInt @default(0) @map("total_bytes")
+  usedBytes     BigInt @default(0) @map("used_bytes")
+  expiryTime    BigInt @default(0) @map("expiry_time")
+  uploadLimit   BigInt @default(0) @map("upload_limit")
+  downloadLimit BigInt @default(0) @map("download_limit")
+  deviceLimit   Int    @default(0) @map("device_limit")
+
+  // 3x-ui style advanced features
+  limitIp        Int       @default(0) @map("limit_ip")           // Max concurrent IPs (0=unlimited)
+  reset          Int       @default(0)                             // Traffic reset period in days (0=never)
+  delayedStart   Boolean   @default(false) @map("delayed_start")   // Start expiry on first connect
+  tgId           String?   @map("tg_id") @db.VarChar(50)           // Telegram ChatID for notifications
+  comment        String?   @db.VarChar(500)                        // User comment/note
+  firstConnectAt DateTime? @map("first_connect_at")                // First connection timestamp
+
+  // Outbound binding (PerUser routing) - use tag directly
+  outboundTag String? @map("outbound_tag") @db.VarChar(100)
+
+  // Inbound tags this client can access (stored as JSON array)
+  inboundTags String[] @default([]) @map("inbound_tags")
+
+  // Management
+  subId     String?  @map("sub_id") @db.VarChar(50)
+  remark    String?  @db.VarChar(255)
+  enable    Boolean  @default(true)
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  clientStats  ClientStats[]
+  clientIpLogs ClientIpLog[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([email])
+  @@index([subId])
+  @@index([enable])
+  @@map("clients")
+}
+
+// Client traffic stats per node/inbound (3x-ui style)
+model ClientStats {
+  id        String @id @default(uuid()) @db.Uuid
+  clientId  String @map("client_id") @db.Uuid
+  nodeId    String @map("node_id") @db.Uuid
+  inboundId String @map("inbound_id") @db.Uuid
+
+  up   BigInt @default(0) // Upload bytes
+  down BigInt @default(0) // Download bytes
+
+  recordedAt DateTime @default(now()) @map("recorded_at")
+
+  client  Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  node    Node    @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  inbound Inbound @relation(fields: [inboundId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, nodeId, inboundId])
+  @@index([nodeId])
+  @@index([clientId])
+  @@map("client_stats")
+}
+
+// Client IP tracking for IP limit enforcement (3x-ui style)
+model ClientIpLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  clientId   String   @map("client_id") @db.Uuid
+  ip         String   @db.VarChar(50)
+  inboundTag String?  @map("inbound_tag") @db.VarChar(100)
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, ip])
+  @@index([clientId])
+  @@index([lastSeenAt])
+  @@map("client_ip_logs")
+}
+
+// ============================================
+// Traffic Statistics Layer (Multi-dimensional)
+// ============================================
+
+// Node-level traffic statistics (aggregated)
+model NodeStats {
+  id        String   @id @default(uuid()) @db.Uuid
+  nodeId    String   @map("node_id") @db.Uuid
+  up        BigInt   @default(0) // Upload bytes
+  down      BigInt   @default(0) // Download bytes
+  timestamp DateTime @default(now())
+
+  node Node @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId, timestamp])
+  @@map("node_stats")
+}
+
+// Inbound-level traffic statistics
+model InboundStats {
+  id        String   @id @default(uuid()) @db.Uuid
+  inboundId String   @map("inbound_id") @db.Uuid
+  up        BigInt   @default(0) // Upload bytes
+  down      BigInt   @default(0) // Download bytes
+  timestamp DateTime @default(now())
+
+  inbound Inbound @relation(fields: [inboundId], references: [id], onDelete: Cascade)
+
+  @@index([inboundId, timestamp])
+  @@map("inbound_stats")
+}
+
+// Time-series traffic data for charts (1-minute buckets)
+model TrafficTimeSeries {
+  id         String   @id @default(uuid()) @db.Uuid
+  entityType String   @map("entity_type") @db.VarChar(20) // 'node' | 'inbound' | 'client'
+  entityId   String   @map("entity_id") @db.Uuid
+  up         BigInt   @default(0) // Upload bytes in this bucket
+  down       BigInt   @default(0) // Download bytes in this bucket
+  bucketTime DateTime @map("bucket_time") // Aligned to minute boundary
+
+  @@unique([entityType, entityId, bucketTime])
+  @@index([entityType, entityId, bucketTime])
+  @@map("traffic_time_series")
+}
+
+// Tenant-level settings (3x-ui style subscription/telegram/security settings)
+model TenantSettings {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @unique @map("tenant_id") @db.Uuid
+
+  // Subscription Settings
+  subEnable     Boolean @default(false) @map("sub_enable")
+  subDomain     String? @map("sub_domain") @db.VarChar(255)
+  subPort       Int?    @map("sub_port")
+  subPath       String  @default("/sub/") @map("sub_path") @db.VarChar(100)
+  subEncrypt    Boolean @default(false) @map("sub_encrypt")
+  subShowInfo   Boolean @default(true) @map("sub_show_info")
+  subTitle      String? @map("sub_title") @db.VarChar(255)
+  subUpdates    Int     @default(12) @map("sub_updates") // Update interval in hours
+  subJsonEnable Boolean @default(false) @map("sub_json_enable")
+  subJsonPath   String  @default("/json/") @map("sub_json_path") @db.VarChar(100)
+
+  // Telegram Bot Settings
+  tgBotEnable      Boolean @default(false) @map("tg_bot_enable")
+  tgBotToken       String? @map("tg_bot_token") @db.VarChar(255)
+  tgBotChatId      String? @map("tg_bot_chat_id") @db.VarChar(100)
+  tgBotProxy       String? @map("tg_bot_proxy") @db.VarChar(255)
+  tgNotifyLogin    Boolean @default(false) @map("tg_notify_login")
+  tgNotifyBackup   Boolean @default(false) @map("tg_notify_backup")
+  tgNotifyCpu      Int     @default(0) @map("tg_notify_cpu") // CPU threshold %
+  tgNotifyExpire   Boolean @default(true) @map("tg_notify_expire")
+  tgNotifyTraffic  Boolean @default(true) @map("tg_notify_traffic")
+
+  // Security Settings
+  ipLimitEnable   Boolean @default(true) @map("ip_limit_enable")
+  twoFactorEnable Boolean @default(false) @map("two_factor_enable")
+  twoFactorToken  String? @map("two_factor_token") @db.VarChar(100)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_settings")
+}
+
+// ============================================
+// Audit & Config Version
+// ============================================
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  userId       String?  @map("user_id") @db.Uuid
+  apiKeyId     String?  @map("api_key_id") @db.Uuid
+  action       String   @db.VarChar(100)
+  resourceType String?  @map("resource_type") @db.VarChar(50)
+  resourceId   String?  @map("resource_id") @db.Uuid
+  changes      Json?
+  ip           String?  @db.VarChar(50)
+  userAgent    String?  @map("user_agent") @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  apiKey TenantApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([createdAt])
+  @@index([resourceType, resourceId])
+  @@map("audit_logs")
+}
+
+model ConfigVersion {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  nodeId       String    @map("node_id") @db.Uuid
+  version      Int       @default(autoincrement())
+  configJson   String    @map("config_json") @db.Text
+  etag         String    @db.VarChar(64)
+  status       String    @default("pending") @db.VarChar(20)
+  errorMsg     String?   @map("error_msg") @db.Text
+  changeType   String    @default("update") @map("change_type") @db.VarChar(20)
+  changedBy    String?   @map("changed_by") @db.Uuid
+  changeReason String?   @map("change_reason") @db.VarChar(255)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  appliedAt    DateTime? @map("applied_at")
+
+  @@index([nodeId, version])
+  @@index([nodeId, status])
+  @@index([tenantId])
+  @@map("config_versions")
+}
+
+// ============================================
+// DNS Provider Layer
+// ============================================
+
+model DnsProvider {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  name          String   @db.VarChar(100)
+  provider      String   @db.VarChar(50)
+  rootDomain    String   @map("root_domain") @db.VarChar(255)
+  zoneId        String?  @map("zone_id") @db.VarChar(100)
+  credentials   Json
+  domainPattern String   @default("{prefix}-{tag}.{root}") @map("domain_pattern") @db.VarChar(255)
+  isDefault     Boolean  @default(false) @map("is_default")
+  enable        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dnsRecords DnsRecord[]
+
+  @@unique([tenantId, rootDomain])
+  @@index([tenantId])
+  @@map("dns_providers")
+}
+
+model DnsRecord {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  providerId String    @map("provider_id") @db.Uuid
+  nodeId     String?   @map("node_id") @db.Uuid
+  recordType String    @map("record_type") @db.VarChar(10)
+  name       String    @db.VarChar(255)
+  content    String    @db.VarChar(255)
+  proxied    Boolean   @default(false)
+  ttl        Int       @default(300)
+  externalId String?   @map("external_id") @db.VarChar(100)
+  status     String    @default("pending") @db.VarChar(20)
+  lastSyncAt DateTime? @map("last_sync_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  provider DnsProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  node     Node?       @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+
+  @@unique([providerId, name])
+  @@index([tenantId])
+  @@index([nodeId])
+  @@index([status])
+  @@map("dns_records")
+}
+
+// ============================================
+// GoSea Plugin Layer
+// ============================================
+
+model GoSeaSocks5Pool {
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  ip                 String    @db.VarChar(50)
+  port               Int
+  username           String    @db.VarChar(100)
+  password           String    @db.VarChar(255)
+  // Location fields (enhanced)
+  continentCode      String?   @map("continent_code") @db.VarChar(5)  // AS, EU, NA, SA, AF, OC
+  continentName      String?   @map("continent_name") @db.VarChar(50)
+  countryCode        String    @map("country_code") @db.VarChar(10)
+  countryName        String?   @map("country_name") @db.VarChar(100)
+  cityCode           String?   @map("city_code") @db.VarChar(50)
+  cityName           String?   @map("city_name") @db.VarChar(100)
+  ispType            String?   @map("isp_type") @db.VarChar(20)
+  status             String    @default("available") @db.VarChar(20)
+  maxAllocations     Int       @default(1) @map("max_allocations")
+  currentAllocations Int       @default(0) @map("current_allocations")
+  costPerDay         Decimal?  @map("cost_per_day") @db.Decimal(10, 4)
+  expiresAt          DateTime? @map("expires_at")
+  source             String?   @db.VarChar(50)
+  sourceProxyId      String?   @map("source_proxy_id") @db.VarChar(100)
+  metadata           Json?     @default("{}")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  allocations GoSeaSocks5Allocation[]
+
+  @@index([tenantId, status])
+  @@index([countryCode, status])
+  @@index([continentCode])
+  @@map("gosea_socks5_pool")
+}
+
+model GoSeaSocks5Allocation {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  poolId          String   @map("pool_id") @db.Uuid
+  orderId         String?  @map("order_id") @db.Uuid
+  externalOrderId String?  @map("external_order_id") @db.VarChar(100)
+  externalUserId  String?  @map("external_user_id") @db.VarChar(100)
+  allocatedAt     DateTime @default(now()) @map("allocated_at")
+  expiresAt       DateTime @map("expires_at")
+  status          String   @default("active") @db.VarChar(20)
+
+  pool          GoSeaSocks5Pool     @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  order         GoSeaOrder?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  relayEndpoint GoSeaRelayEndpoint?
+
+  @@index([tenantId, status])
+  @@index([externalOrderId])
+  @@index([orderId])
+  @@map("gosea_socks5_allocations")
+}
+
+model GoSeaRelayEndpoint {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  nodeId          String   @map("node_id") @db.Uuid
+  orderId         String?  @map("order_id") @db.Uuid
+  protocol        String   @default("vless") @db.VarChar(20)
+  uuid            String   @db.VarChar(36)
+  inboundPort     Int      @map("inbound_port")
+  targetSocks5    Json     @map("target_socks5") @db.JsonB
+  allocationId    String?  @unique @map("allocation_id") @db.Uuid
+  domainName      String?  @map("domain_name") @db.VarChar(255)
+  dnsRecordId     String?  @map("dns_record_id") @db.Uuid
+  externalOrderId String?  @map("external_order_id") @db.VarChar(100)
+  externalUserId  String?  @map("external_user_id") @db.VarChar(100)
+  status          String   @default("active") @db.VarChar(20)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  node       Node                   @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  order      GoSeaOrder?            @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  allocation GoSeaSocks5Allocation? @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([nodeId])
+  @@index([uuid])
+  @@index([orderId])
+  @@map("gosea_relay_endpoints")
+}
+
+// GoSea Order Management
+model GoSeaOrder {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  orderNo         String    @unique @map("order_no") @db.VarChar(50)
+  externalOrderNo String?   @map("external_order_no") @db.VarChar(100)
+  status          String    @default("pending") @db.VarChar(20) // pending, processing, completed, failed, cancelled
+  type            String    @default("purchase") @db.VarChar(20) // purchase, renewal
+  countryCode     String    @map("country_code") @db.VarChar(10)
+  cityCode        String?   @map("city_code") @db.VarChar(50)
+  quantity        Int
+  days            Int
+  totalPrice      Decimal?  @map("total_price") @db.Decimal(10, 2)
+  currency        String?   @db.VarChar(10)
+  protocol        String    @default("vless") @db.VarChar(20) // vless, vmess, shadowsocks, trojan
+  createdAt       DateTime  @default(now()) @map("created_at")
+  completedAt     DateTime? @map("completed_at")
+
+  allocations GoSeaSocks5Allocation[]
+  relays      GoSeaRelayEndpoint[]
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([externalOrderNo])
+  @@map("gosea_orders")
+}
+
+// GoSea Subscription for link generation
+model GoSeaSubscription {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  token          String    @unique @db.VarChar(64)
+  externalUserId String    @map("external_user_id") @db.VarChar(100)
+  relayIds       String[]  @map("relay_ids")
+  expiresAt      DateTime? @map("expires_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@index([externalUserId])
+  @@map("gosea_subscriptions")
+}
+
+// ============================================
+// System Settings
+// ============================================
+
+model SystemSetting {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique @db.VarChar(100)
+  value     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}

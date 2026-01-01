@@ -1,0 +1,29 @@
+# Panel Agent Configuration
+# All settings can be overridden via environment variables with PANEL_AGENT_ prefix
+# Example: PANEL_AGENT_PANEL_URL or PANEL_URL (backward compatible)
+
+panel:
+  url: "http://localhost:3001"
+  token: ""  # Required: Node token from Panel (env: NODE_TOKEN)
+  api_prefix: "/api"
+
+xray:
+  binary_path: "/usr/local/bin/xray"
+  config_path: "/etc/xray/config.json"
+  asset_path: "/usr/local/share/xray"
+  api_address: "127.0.0.1:10085"
+
+interval:
+  config_poll: "30s"
+  user_poll: "30s"
+  traffic_report: "10s"
+  status_report: "10s"
+  alive_poll: "60s"
+
+http:
+  timeout: "30s"
+  retry_count: 3
+
+log:
+  level: "info"  # debug, info, warn, error
+  file: ""       # Empty for stderr

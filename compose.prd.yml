@@ -1,0 +1,81 @@
+# Panel Production Docker Compose (Dokploy)
+# No exposed ports - Dokploy handles reverse proxy
+# Required env vars: PANEL_API_IMAGE, PANEL_WEB_IMAGE, POSTGRES_PASSWORD, VITE_API_URL
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: panel-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-panel_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: ${POSTGRES_DB:-panel}
+    volumes:
+      - panel_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-panel_user} -d ${POSTGRES_DB:-panel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - panel-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: panel-redis
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - panel_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - panel-network
+
+  api:
+    image: ${PANEL_API_IMAGE:?PANEL_API_IMAGE required}
+    container_name: panel-api
+    restart: always
+    env_file:
+      - ./apps/api/.env.prd
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-panel_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-panel}
+      REDIS_URL: redis://redis:6379
+    expose:
+      - "3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - panel-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  web:
+    image: ${PANEL_WEB_IMAGE:?PANEL_WEB_IMAGE required}
+    container_name: panel-web
+    restart: always
+    environment:
+      VITE_API_URL: ${VITE_API_URL:?VITE_API_URL required}
+    expose:
+      - "80"
+    depends_on:
+      - api
+    networks:
+      - panel-network
+
+volumes:
+  panel_postgres_data:
+  panel_redis_data:
+
+networks:
+  panel-network:
+    driver: bridge

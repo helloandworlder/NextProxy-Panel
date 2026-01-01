@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package agent;
+
+option go_package = "github.com/nextproxy/panel/agent";
+
+// AgentService - Bidirectional streaming for Agent-Panel communication
+service AgentService {
+  // Connect establishes a bidirectional stream for real-time communication
+  rpc Connect(stream AgentMessage) returns (stream PanelMessage);
+}
+
+// ========================================
+// Agent -> Panel Messages
+// ========================================
+
+message AgentMessage {
+  oneof payload {
+    RegisterRequest register = 1;
+    StatusReport status = 2;
+    TrafficReport traffic = 3;
+    AliveReport alive = 4;
+  }
+}
+
+message RegisterRequest {
+  string node_id = 1;
+  string token = 2;
+  string version = 3;
+  string core_type = 4;    // "xray" or "singbox"
+  string core_version = 5;
+}
+
+message StatusReport {
+  double cpu_usage = 1;
+  double memory_usage = 2;
+  double disk_usage = 3;
+  int64 uptime = 4;
+  int32 connections = 5;
+}
+
+message TrafficReport {
+  repeated UserTraffic users = 1;
+  repeated InboundTraffic inbounds = 2;
+  repeated OutboundTraffic outbounds = 3;
+  int64 timestamp = 4;
+}
+
+message UserTraffic {
+  string email = 1;
+  int64 upload = 2;
+  int64 download = 3;
+  int64 upload_rate = 4;   // bytes/s
+  int64 download_rate = 5; // bytes/s
+}
+
+message InboundTraffic {
+  string tag = 1;
+  int64 upload = 2;
+  int64 download = 3;
+}
+
+message OutboundTraffic {
+  string tag = 1;
+  int64 upload = 2;
+  int64 download = 3;
+}
+
+message AliveReport {
+  int64 timestamp = 1;
+}
+
+// ========================================
+// Panel -> Agent Messages
+// ========================================
+
+message PanelMessage {
+  oneof payload {
+    RegisterResponse register_response = 1;
+    ConfigUpdate config = 2;
+    UsersUpdate users = 3;
+    KickUsers kick = 4;
+    RateLimitUpdate rate_limit = 5;
+    AliveResponse alive_response = 6;
+  }
+}
+
+message RegisterResponse {
+  bool success = 1;
+  string message = 2;
+  int32 traffic_interval = 3;  // Traffic report interval in seconds
+  int32 status_interval = 4;   // Status report interval in seconds
+}
+
+message ConfigUpdate {
+  string config_json = 1;
+  string etag = 2;
+  int64 version = 3;
+}
+
+message UsersUpdate {
+  repeated UserConfig added = 1;
+  repeated string removed = 2;  // emails to remove
+  string etag = 3;
+}
+
+message UserConfig {
+  string email = 1;
+  string uuid = 2;
+  string password = 3;
+  string flow = 4;
+  int32 alter_id = 5;
+  string security = 6;
+  string method = 7;
+  int32 level = 8;
+  int64 upload_limit = 9;
+  int64 download_limit = 10;
+}
+
+message KickUsers {
+  repeated string emails = 1;
+  string reason = 2;
+}
+
+message RateLimitUpdate {
+  string email = 1;
+  int64 upload_limit = 2;
+  int64 download_limit = 3;
+}
+
+message AliveResponse {
+  int64 timestamp = 1;
+}

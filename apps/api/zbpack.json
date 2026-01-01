@@ -1,0 +1,5 @@
+{
+  "build_command": "npx prisma generate && npm run build",
+  "start_command": "npx prisma migrate deploy && node dist/main.js",
+  "dockerfile": "./Dockerfile"
+}
