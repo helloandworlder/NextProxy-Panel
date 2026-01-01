@@ -1,0 +1,224 @@
+apiVersion: zeabur.com/v1
+kind: Template
+metadata:
+  name: NextProxy Panel
+spec:
+  description: Multi-tenant proxy management platform with Node Group load balancing
+  icon: https://raw.githubusercontent.com/helloandworlder/NextProxy-Panel/main/apps/web/public/logo.svg
+  tags:
+    - Tool
+    - DevOps
+  variables:
+    - key: PUBLIC_DOMAIN
+      type: DOMAIN
+      name: Panel Domain
+      description: Domain for the Panel web interface (e.g., panel.synex.im)
+    - key: API_DOMAIN
+      type: DOMAIN
+      name: API Domain
+      description: Domain for the API service (e.g., api.panel.synex.im)
+    - key: JWT_SECRET
+      type: STRING
+      name: JWT Secret
+      description: Secret key for JWT tokens (min 32 characters)
+    - key: SYSADMIN_PASSWORD
+      type: STRING
+      name: System Admin Password
+      description: Password for the system administrator account
+    - key: ADMIN_PASSWORD
+      type: STRING
+      name: Tenant Admin Password
+      description: Password for the default tenant administrator
+  readme: |-
+    # NextProxy Panel
+
+    Multi-tenant proxy management platform with advanced features:
+
+    - **Node Group Load Balancing**: 7 strategies (round_robin, random, least_load, least_slots, least_bandwidth, weighted, geo_nearest)
+    - **Real-time Health Checks**: Resource thresholds, recovery logic
+    - **GoSea Integration**: Socks5/Relay proxy generation
+    - **Multi-tenant**: Isolated tenant management with RBAC
+
+    ## Default Credentials
+
+    After deployment, login with:
+    - **System Admin**: `sysadmin` / (your SYSADMIN_PASSWORD)
+    - **Tenant Admin**: `admin` / (your ADMIN_PASSWORD)
+
+    ## Architecture
+
+    - **API**: NestJS backend with Prisma ORM
+    - **Web**: React frontend with Vite
+    - **Database**: PostgreSQL
+    - **Cache**: Redis
+
+  services:
+    - name: PostgreSQL
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/postgresql.svg
+      template: PREBUILT
+      spec:
+        source:
+          image: postgres:16-alpine
+        ports:
+          - id: database
+            port: 5432
+            type: TCP
+        volumes:
+          - id: data
+            dir: /var/lib/postgresql/data
+        env:
+          POSTGRES_USER:
+            default: panel_user
+          POSTGRES_PASSWORD:
+            default: ${PASSWORD}
+            expose: true
+          POSTGRES_DB:
+            default: panel
+          POSTGRES_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          POSTGRES_PORT:
+            default: "5432"
+            expose: true
+            readonly: true
+          POSTGRES_URI:
+            default: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+            expose: true
+            readonly: true
+
+    - name: Redis
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/redis.svg
+      template: PREBUILT
+      spec:
+        source:
+          image: redis:7-alpine
+        ports:
+          - id: database
+            port: 6379
+            type: TCP
+        volumes:
+          - id: data
+            dir: /data
+        env:
+          REDIS_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          REDIS_PORT:
+            default: "6379"
+            expose: true
+            readonly: true
+          REDIS_URI:
+            default: redis://${REDIS_HOST}:${REDIS_PORT}
+            expose: true
+            readonly: true
+
+    - name: API
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/nestjs.svg
+      template: GIT
+      domainKey: API_DOMAIN
+      spec:
+        source:
+          repoURL: https://github.com/helloandworlder/NextProxy-Panel
+          branch: main
+          submodulePath: apps/api
+        ports:
+          - id: web
+            port: 3000
+            type: HTTP
+        env:
+          DATABASE_URL:
+            default: ${POSTGRES_URI}
+          REDIS_URL:
+            default: ${REDIS_URI}
+          JWT_SECRET:
+            default: ${JWT_SECRET}
+          JWT_EXPIRES_IN:
+            default: 7d
+          API_PORT:
+            default: "3000"
+          API_PREFIX:
+            default: api/v1
+          NODE_ENV:
+            default: production
+          LOG_LEVEL:
+            default: info
+          CORS_ORIGIN:
+            default: https://${PUBLIC_DOMAIN}
+          SYSADMIN_USERNAME:
+            default: sysadmin
+          SYSADMIN_PASSWORD:
+            default: ${SYSADMIN_PASSWORD}
+          SYSADMIN_EMAIL:
+            default: sysadmin@example.com
+          ADMIN_USERNAME:
+            default: admin
+          ADMIN_PASSWORD:
+            default: ${ADMIN_PASSWORD}
+          ADMIN_EMAIL:
+            default: admin@example.com
+
+    - name: Web
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/react.svg
+      template: GIT
+      domainKey: PUBLIC_DOMAIN
+      spec:
+        source:
+          repoURL: https://github.com/helloandworlder/NextProxy-Panel
+          branch: main
+          submodulePath: apps/web
+        ports:
+          - id: web
+            port: 80
+            type: HTTP
+        env:
+          VITE_API_URL:
+            default: https://${API_DOMAIN}
+
+localization:
+  zh-CN:
+    description: 多租户代理管理平台，支持节点组负载均衡
+    variables:
+      - key: PUBLIC_DOMAIN
+        type: DOMAIN
+        name: 面板域名
+        description: Panel 网页界面的域名（如 panel.synex.im）
+      - key: API_DOMAIN
+        type: DOMAIN
+        name: API 域名
+        description: API 服务的域名（如 api.panel.synex.im）
+      - key: JWT_SECRET
+        type: STRING
+        name: JWT 密钥
+        description: JWT 令牌的签名密钥（至少32字符）
+      - key: SYSADMIN_PASSWORD
+        type: STRING
+        name: 系统管理员密码
+        description: 系统管理员账户的密码
+      - key: ADMIN_PASSWORD
+        type: STRING
+        name: 租户管理员密码
+        description: 默认租户管理员的密码
+    readme: |-
+      # NextProxy Panel
+
+      多租户代理管理平台，具有以下高级功能：
+
+      - **节点组负载均衡**：7种策略（轮询、随机、最小负载、最少槽位、最小带宽、加权、地理最近）
+      - **实时健康检查**：资源阈值、恢复逻辑
+      - **GoSea 集成**：Socks5/Relay 代理生成
+      - **多租户**：隔离的租户管理与 RBAC
+
+      ## 默认凭据
+
+      部署后，使用以下账户登录：
+      - **系统管理员**：`sysadmin` / (你设置的 SYSADMIN_PASSWORD)
+      - **租户管理员**：`admin` / (你设置的 ADMIN_PASSWORD)
+
+      ## 架构
+
+      - **API**：NestJS 后端 + Prisma ORM
+      - **Web**：React 前端 + Vite
+      - **数据库**：PostgreSQL
+      - **缓存**：Redis
